@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "RQrun Training Data",
+    "description": "Connects your RQrun account so the agent can read activities, training load, fitness/fatigue and runlevel."
+  }
+}

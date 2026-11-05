@@ -1,0 +1,11 @@
+{
+  "mcp": {
+    "servers": {
+      "rqrun": {
+        "command": "/绝对路径/rqrun-mcp/.venv/bin/python",
+        "args": ["/绝对路径/rqrun-mcp/rq_mcp.py"],
+        "env": {}
+      }
+    }
+  }
+}
