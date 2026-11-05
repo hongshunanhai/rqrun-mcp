@@ -5,3 +5,4 @@ __pycache__/
 session.json
 charts/
 .DS_Store
+.dsh-bundle-local/
