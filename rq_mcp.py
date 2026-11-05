@@ -1013,6 +1013,23 @@ def _chart_activity(activity_id: str) -> bytes:
     return buf.getvalue()
 
 
+def _month_total_km(today, sid, rows, oldest):
+    """本月累计。
+
+    正常走周期接口；接口失败时**只有确认分页已覆盖到月初**才用本地求和，
+    否则返回 (None, 说明)，避免把部分数据当成整月展示。
+    """
+    month_start = today.replace(day=1)
+    try:
+        st = api("User/Mydata/record_data_period_total", date=today.strftime("%Y-%m"),
+                 ttype=2, sport_id=sid, ver=1, student_user_id=0, group_id=0)
+        return float(st.get("total_distance") or 0), ""
+    except RQError:
+        if oldest is not None and oldest <= month_start:
+            return sum(km for d, km in rows if d >= month_start), ""
+        return None, "暂不可用"
+
+
 def _chart_volume(weeks: int = 10, sport: str = "run") -> bytes:
     from PIL import Image, ImageDraw
     import io
@@ -1061,14 +1078,8 @@ def _chart_volume(weeks: int = 10, sport: str = "run") -> bytes:
     bars = [{"label": f"{w['start'].month}/{w['start'].day}",
              "km": w["km"], "n": w["n"], "cur": w["current"]} for w in series]
 
-    # 本月累计单独走周期接口：分页可能只回溯到本次请求的起始周，不能拿它当整月
-    month_start = today.replace(day=1)
-    try:
-        mstat = api("User/Mydata/record_data_period_total", date=today.strftime("%Y-%m"),
-                    ttype=2, sport_id=sid, ver=1, student_user_id=0, group_id=0)
-        m_km = float(mstat.get("total_distance") or 0)
-    except RQError:
-        m_km = sum(km_ for day_, km_ in rows if day_ >= month_start)
+    # 本月累计单独走周期接口；失败时不会拿部分数据冒充整月
+    month_km, month_note = _month_total_km(today, sid, rows, oldest)
 
     W, H = 2000, 1180
     im = Image.new("RGB", (W, H), BG)
@@ -1108,7 +1119,9 @@ def _chart_volume(weeks: int = 10, sport: str = "run") -> bytes:
     _stat_cards(d, 96, X1, 1000, [
         ("近 %d 周总量" % len(bars), f"{total_km:.0f}", "km", INK),
         ("周均", f"{avg:.1f}", "km", INK),
-        ("本月累计", f"{m_km:.1f}", "km", GREEN),
+        ("本月累计", f"{month_km:.1f}" if month_km is not None else "—",
+         "km" if month_km is not None else month_note,
+         GREEN if month_km is not None else MUTED),
         ("完成周数", f"{sum(1 for b in bars if b['km'] > 0)}", f"/ {len(bars)}", INK),
     ])
 

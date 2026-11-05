@@ -130,6 +130,20 @@ def test_codex_merge():
     check("其它 MCP 段保留", data["mcp_servers"]["other"]["command"] == "x")
     check("其它顶层段保留", data["model"]["name"] == "gpt-5")
 
+    # 路径里带方括号，曾导致字符计数的数组边界判断吞掉后续用户设置
+    f4 = d / "c4.toml"
+    f4.write_text(
+        '[mcp_servers.rqrun] # existing\n'
+        'command = "/old/[local/python"\n'
+        'args = ["/old/rq_mcp.py"]\n'
+        'enabled = false\n'
+        'env_vars = { FOO = "bar" }\n',
+        encoding="utf-8")
+    M.merge(str(f4), "/new/python", "/new/rq_mcp.py")
+    d4 = tomllib.loads(f4.read_text(encoding="utf-8"))["mcp_servers"]["rqrun"]
+    check("路径含方括号不误吞后续设置", d4.get("enabled") is False, d4)
+    check("路径含方括号时 env_vars 保留", d4.get("env_vars") == {"FOO": "bar"}, d4)
+
     f2 = d / "c2.toml"
     f2.write_text("[a]\nx = 1\n", encoding="utf-8")
     M.merge(str(f2), "/py", "/s.py")
@@ -189,6 +203,33 @@ def test_chart_pagination_boundary():
     check("图表仍能正常生成", isinstance(png, bytes) and len(png) > 1000)
 
 
+def test_month_total_fallback():
+    print("本月累计回退语义")
+    from datetime import date, timedelta
+
+    today = date.today()
+    month_start = today.replace(day=1)
+    original = R.api
+
+    def failing_api(action, **kw):
+        if action == "User/Mydata/record_data_period_total":
+            raise R.RQError("模拟接口失败")
+        raise AssertionError(action)
+
+    R.api = failing_api
+    try:
+        # 分页没有覆盖到月初 -> 不能拿部分数据冒充整月
+        val, note = R._month_total_km(today, "1", [(today, 5.0)], oldest=today)
+        check("未覆盖月初时返回不可用", val is None and note == "暂不可用", (val, note))
+
+        # 已覆盖到月初 -> 可以用本地求和兜底
+        rows = [(month_start, 6.0), (today, 5.0)]
+        val2, note2 = R._month_total_km(today, "1", rows, oldest=month_start - timedelta(days=3))
+        check("已覆盖月初时本地兜底求和", val2 == 11.0 and note2 == "", (val2, note2))
+    finally:
+        R.api = original
+
+
 def main():
     test_sport_id()
     test_calendar_days()
@@ -196,6 +237,7 @@ def main():
     test_format_helpers()
     test_codex_merge()
     test_chart_pagination_boundary()
+    test_month_total_fallback()
     print()
     if FAILS:
         print(f"❌ {len(FAILS)} 项失败: {FAILS}")
