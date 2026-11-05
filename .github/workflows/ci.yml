@@ -83,16 +83,60 @@ jobs:
           test "$(grep -c 'id: mcp-rqrun' "$HOME/.dsh/profiles/ci/cordis.patch.yml")" = "1"
           echo "安装器冒烟测试通过"
 
-      - name: 安装器不得覆盖已有的 .agents 配置
+      - name: ZCode 不得屏蔽已有的 .agents 服务（含"原生配置只有主题"的情况）
         run: |
           export HOME="$(mktemp -d)"
-          mkdir -p "$HOME/.agents"
+          mkdir -p "$HOME/.zcode/cli" "$HOME/.agents"
+          printf '%s' '{"theme":"dark"}' > "$HOME/.zcode/cli/config.json"
           printf '%s' '{"mcpServers":{"existing":{"command":"echo"}}}' > "$HOME/.agents/mcp.json"
 
           ./install.sh --no-login --client=zcode
 
-          test -f "$HOME/.agents/mcp.json"
-          test ! -e "$HOME/.zcode/cli/config.json"
-          grep -q '"existing"' "$HOME/.agents/mcp.json"
-          grep -q '"rqrun"' "$HOME/.agents/mcp.json"
-          echo "ZCode 沿用 .agents 配置，未新建 .zcode"
+          python3 - <<'PY'
+          import json, os
+          home = os.environ["HOME"]
+          zc = json.load(open(f"{home}/.zcode/cli/config.json"))
+          ag = json.load(open(f"{home}/.agents/mcp.json"))
+          assert zc.get("theme") == "dark", "主题等既有设置被破坏"
+          assert not zc.get("mcp"), "不应往只含主题的原生配置里加 MCP"
+          assert "existing" in ag["mcpServers"], "原有服务被丢弃"
+          assert "rqrun" in ag["mcpServers"], "rqrun 未写入"
+          print("ZCode：沿用 .agents，未屏蔽原有服务")
+          PY
+
+      - name: Codex 已有配置时要更新而不是跳过
+        run: |
+          export HOME="$(mktemp -d)"
+          mkdir -p "$HOME/.codex"
+          printf '%s\n' \
+            '[model]' 'name = "gpt-5"' '' \
+            '[mcp_servers.rqrun]' 'command = "/old/python"' 'args = ["/old/rq_mcp.py"]' \
+            'tool_timeout_sec = 120.0' '' '[mcp_servers.other]' 'command = "x"' \
+            > "$HOME/.codex/config.toml"
+
+          ./install.sh --no-login --client=codex
+
+          grep -q 'tool_timeout_sec = 600.0' "$HOME/.codex/config.toml"
+          grep -q 'mcp_servers.other' "$HOME/.codex/config.toml"
+          grep -q 'name = "gpt-5"' "$HOME/.codex/config.toml"
+          test "$(grep -c '^\[mcp_servers.rqrun\]' "$HOME/.codex/config.toml")" = "1"
+          echo "Codex：旧配置被更新且其它段保留"
+
+      - name: DSH 多 profile 时不得瞎写
+        run: |
+          export HOME="$(mktemp -d)"
+          mkdir -p "$HOME/.dsh/profiles/alpha" "$HOME/.dsh/profiles/beta"
+          touch "$HOME/.dsh/profiles/alpha/cordis.patch.yml" "$HOME/.dsh/profiles/beta/cordis.patch.yml"
+
+          ./install.sh --no-login --client=dsh
+
+          test "$(grep -c 'mcp-rqrun' "$HOME/.dsh/profiles/alpha/cordis.patch.yml")" = "0"
+          test "$(grep -c 'mcp-rqrun' "$HOME/.dsh/profiles/beta/cordis.patch.yml")" = "0"
+
+          DSH_PROFILE=nope ./install.sh --no-login --client=dsh
+          test "$(grep -c 'mcp-rqrun' "$HOME/.dsh/profiles/alpha/cordis.patch.yml")" = "0"
+
+          DSH_PROFILE=beta ./install.sh --no-login --client=dsh
+          test "$(grep -c 'mcp-rqrun' "$HOME/.dsh/profiles/beta/cordis.patch.yml")" = "1"
+          test "$(grep -c 'mcp-rqrun' "$HOME/.dsh/profiles/alpha/cordis.patch.yml")" = "0"
+          echo "DSH：多 profile 跳过、指定不存在跳过、指定正确只写一个"

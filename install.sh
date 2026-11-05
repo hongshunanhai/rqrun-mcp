@@ -120,6 +120,57 @@ print(f"  ✓ {path}")
 PYEOF
 }
 
+# 判断某个 JSON 配置里是否**真的存在** MCP 服务（只看文件存在是不够的）
+json_has_mcp() { # $1=文件 $2=native|agents
+  [ -f "$1" ] || return 1
+  "$VENV_PY" - "$1" "$2" <<'PYEOF' >/dev/null 2>&1
+import json, sys
+path, kind = sys.argv[1], sys.argv[2]
+try:
+    data = json.load(open(path, encoding="utf-8"))
+except Exception:
+    sys.exit(1)
+if not isinstance(data, dict):
+    sys.exit(1)
+servers = (data.get("mcp") or {}).get("servers") if kind == "native" else data.get("mcpServers")
+sys.exit(0 if isinstance(servers, dict) and servers else 1)
+PYEOF
+}
+
+# 写入或更新 Codex 的 [mcp_servers.rqrun] 段，保留文件里其它内容
+write_codex_toml() { # $1=config.toml
+  "$VENV_PY" - "$1" "$VENV_PY" "$PY_SCRIPT" <<'PYEOF'
+import os, re, shutil, sys
+path, py, script = sys.argv[1], sys.argv[2], sys.argv[3]
+block = (
+    "[mcp_servers.rqrun]\n"
+    f'command = "{py}"\n'
+    f'args = ["{script}"]\n'
+    "startup_timeout_sec = 30.0\n"
+    "tool_timeout_sec = 600.0\n"
+)
+text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+lines = text.splitlines()
+start = next((i for i, l in enumerate(lines)
+              if re.match(r"^\s*\[mcp_servers\.rqrun\]\s*$", l)), None)
+if start is None:
+    new = text.rstrip("\n") + ("\n\n" if text.strip() else "") + block
+    status = "新增"
+else:
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        if re.match(r"^\s*\[", lines[j]):
+            end = j
+            break
+    new = "\n".join(lines[:start] + block.splitlines() + [""] + lines[end:]).rstrip("\n") + "\n"
+    status = "更新"
+if os.path.exists(path):
+    shutil.copy2(path, path + ".bak")
+open(path, "w", encoding="utf-8").write(new)
+print(f"  ✓ {path}（{status}）")
+PYEOF
+}
+
 # ---- Claude Code ----
 if want claude; then
   if command -v claude >/dev/null 2>&1; then
@@ -141,20 +192,7 @@ if want codex; then
   if command -v codex >/dev/null 2>&1 || [ -d "$HOME/.codex" ]; then
     CO="$HOME/.codex/config.toml"
     mkdir -p "$HOME/.codex"
-    if grep -q '^\[mcp_servers\.rqrun\]' "$CO" 2>/dev/null; then
-      ok "Codex：已配置过 rqrun"
-    else
-      [ -f "$CO" ] && cp "$CO" "$CO.bak"
-      cat >> "$CO" <<EOF
-
-[mcp_servers.rqrun]
-command = "$VENV_PY"
-args = ["$PY_SCRIPT"]
-startup_timeout_sec = 30.0
-tool_timeout_sec = 600.0
-EOF
-      ok "Codex：已写入 $CO"
-    fi
+    write_codex_toml "$CO"
   else
     warn "Codex：未检测到 ~/.codex（未安装 Codex CLI）"
   fi
@@ -165,15 +203,15 @@ if want zcode; then
   if [ -d "$HOME/.zcode" ] || [ -d "$HOME/.agents" ] || command -v zcode >/dev/null 2>&1; then
     ZC="$HOME/.zcode/cli/config.json"
     AG="$HOME/.agents/mcp.json"
-    if [ -f "$ZC" ] || [ ! -f "$AG" ]; then
-      # ZCode 原生配置（面板里可见）
+    if json_has_mcp "$ZC" native; then
+      merge_json "$ZC" zcode
+      ok "ZCode：已合并进原有原生配置 $ZC"
+    elif json_has_mcp "$AG" agents; then
+      merge_json "$AG" mcpServers
+      ok "ZCode：已合并进 ${AG}（沿用原有 .agents 来源，未新建 .zcode）"
+    else
       merge_json "$ZC" zcode
       ok "ZCode：已写入 $ZC"
-      [ -f "$AG" ] && warn "注意：你还有 ${AG}；按 ZCode 规则它会因 .zcode 存在而整体失效"
-    else
-      # 已有 .agents 兜底配置：写这里，避免新建 .zcode 把原有服务全部顶掉
-      merge_json "$AG" mcpServers
-      ok "ZCode：已写入 ${AG}（沿用你原有的 .agents 配置，未新建 .zcode）"
     fi
   else
     warn "ZCode：未检测到 ~/.zcode（未安装 ZCode）"
@@ -193,19 +231,28 @@ fi
 # ---- DeepSeek Harness ----
 if want dsh; then
   DSH_PATCH=""
-  if [ -n "${DSH_PROFILE:-}" ] && [ -f "$HOME/.dsh/profiles/$DSH_PROFILE/cordis.patch.yml" ]; then
-    # 优先用当前会话的 profile
-    DSH_PATCH="$HOME/.dsh/profiles/$DSH_PROFILE/cordis.patch.yml"
+  AVAILABLE="$(ls "$HOME/.dsh/profiles" 2>/dev/null | tr '\n' ' ')"
+  if [ -n "${DSH_PROFILE:-}" ]; then
+    CAND="$HOME/.dsh/profiles/$DSH_PROFILE/cordis.patch.yml"
+    if [ -f "$CAND" ]; then
+      DSH_PATCH="$CAND"
+    else
+      warn "指定的 DSH_PROFILE=$DSH_PROFILE 不存在，已跳过（可用：${AVAILABLE:-无}）"
+    fi
   else
     COUNT=0
+    ONLY=""
     for p in "$HOME"/.dsh/profiles/*/cordis.patch.yml; do
       [ -f "$p" ] || continue
       COUNT=$((COUNT + 1))
-      DSH_PATCH="$p"
+      ONLY="$p"
     done
-    if [ "$COUNT" -gt 1 ]; then
-      warn "检测到 $COUNT 个 DSH profile，已选最后一个：$DSH_PATCH"
-      warn "若有多个 profile，请用  DSH_PROFILE=<名字> ./install.sh --client=dsh  指定"
+    if [ "$COUNT" -eq 1 ]; then
+      DSH_PATCH="$ONLY"
+    elif [ "$COUNT" -gt 1 ]; then
+      warn "检测到 $COUNT 个 DSH profile，为避免写错已跳过"
+      warn "请指定后重跑：DSH_PROFILE=<名字> ./install.sh --client=dsh"
+      warn "可用：${AVAILABLE:-无}"
     fi
   fi
   if [ -n "$DSH_PATCH" ]; then

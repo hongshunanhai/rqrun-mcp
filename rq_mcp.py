@@ -428,6 +428,9 @@ def _weekly_series(rows, weeks: int, today: date | None = None) -> list:
 
     返回按时间正序的列表，current 标记本周（可能是部分周）。
     """
+    if int(weeks) < 1:
+        raise RQError("weeks 必须 >= 1")
+    weeks = int(weeks)
     today = today or date.today()
     curw = today - timedelta(days=today.weekday())
     keys = [curw - timedelta(weeks=i) for i in range(weeks - 1, -1, -1)]
@@ -1015,24 +1018,46 @@ def _chart_volume(weeks: int = 10, sport: str = "run") -> bytes:
     import io
 
     sid = _sport_id(sport, "1")
-    rows, page = [], 1
-    while page <= 5:
+    weeks = int(weeks)
+    if weeks < 1:
+        raise RQError("weeks 必须 >= 1")
+    weeks = min(weeks, 52)
+
+    today = date.today()
+    curw = today - timedelta(days=today.weekday())
+    target_start = curw - timedelta(weeks=weeks - 1)
+
+    rows, page, oldest, hit_cap = [], 1, None, False
+    MAX_PAGES = 200                      # 100 条/页 => 最多回看 2 万条
+    while True:
+        if page > MAX_PAGES:
+            hit_cap = True
+            break
         d = api("User/Record/get_list", page=page, limit=100, period_type="all")
         lst = d.get("list") or []
         if not lst:
             break
         for r in lst:
+            day = date.fromisoformat((r.get("training_at") or "")[:10])
+            if oldest is None or day < oldest:
+                oldest = day
             if str(r.get("sport_id")) != sid:
                 continue
-            rows.append((date.fromisoformat((r.get("training_at") or "")[:10]),
-                         float(r.get("distance") or 0) / 1000))
+            rows.append((day, float(r.get("distance") or 0) / 1000))
         if len(lst) < 100:
-            break
+            break                        # 历史读完了
+        if oldest and oldest <= target_start:
+            break                        # 已覆盖到目标起始周
         page += 1
     if not rows:
         raise RQError("没有可用的训练记录")
 
-    series = _weekly_series(rows, weeks)
+    # 只有"被页数上限截断"才算数据不完整；读完了历史则前面的周是真的没跑
+    note = ""
+    if hit_cap and (oldest is None or oldest > target_start):
+        note = f"※ 仅回溯到 {oldest}，更早的周未计入"
+
+    series = _weekly_series(rows, weeks, today=today)
     bars = [{"label": f"{w['start'].month}/{w['start'].day}",
              "km": w["km"], "n": w["n"], "cur": w["current"]} for w in series]
 
@@ -1068,6 +1093,9 @@ def _chart_volume(weeks: int = 10, sport: str = "run") -> bytes:
                fill=INK if b["cur"] else MUTED, anchor="ma")
         d.text((cx, BASE + 66), "本周" if b["cur"] else f"{b['n']}次",
                font=_font(21), fill=GREEN if b["cur"] else FAINT, anchor="ma")
+
+    if note:
+        d.text((96, 946), note, font=_font(22), fill=(196, 96, 32), anchor="la")
 
     total_km = sum(b["km"] for b in bars)
     avg = total_km / max(1, len(bars))
