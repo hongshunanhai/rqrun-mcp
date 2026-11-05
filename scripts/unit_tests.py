@@ -203,6 +203,14 @@ def test_chart_pagination_boundary():
     check("图表仍能正常生成", isinstance(png, bytes) and len(png) > 1000)
 
 
+def test_series_seconds():
+    print("周期时长求和")
+    items = [{"total_time": 2567}, {"total_time": 2084}, {"total_time": 2415}]
+    check("按明细秒数求和", R._series_total_seconds(items) == 7066)
+    check("空明细返回 0", R._series_total_seconds([]) == 0)
+    check("缺字段按 0 处理", R._series_total_seconds([{"total_time": 10}, {}]) == 10)
+
+
 def test_month_total_fallback():
     print("本月累计回退语义")
     from datetime import date, timedelta
@@ -238,6 +246,7 @@ def main():
     test_codex_merge()
     test_chart_pagination_boundary()
     test_month_total_fallback()
+    test_series_seconds()
     print()
     if FAILS:
         print(f"❌ {len(FAILS)} 项失败: {FAILS}")

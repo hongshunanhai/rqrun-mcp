@@ -587,6 +587,11 @@ def t_get_activity(activity_id: str, include_streams: bool = False,
     return compact(out)
 
 
+def _series_total_seconds(items) -> float:
+    """周期明细里逐条的 total_time 是秒，求和比接口顶层的小时字段精确。"""
+    return sum(float(i.get("total_time") or 0) for i in (items or []))
+
+
 def t_get_period_stats(period: str = "month", date_str: str | None = None,
                        sport: str | None = "run") -> dict:
     period = (period or "month").lower()
@@ -608,7 +613,7 @@ def t_get_period_stats(period: str = "month", date_str: str | None = None,
             "分年": [{"年": p.get("period"), "距离_km": p.get("total_distance"),
                       "配速": p.get("pace"), "负荷": num(p.get("total_point"), 1),
                       "跑力": p.get("last_runlevel")}
-                     for p in (d.get("period_list") or [])],
+                     for p in items],
         })
     today = date.today()
     ttype = {"year": 1, "month": 2, "week": 3, "custom": 4}.get(period, 2)
@@ -625,6 +630,9 @@ def t_get_period_stats(period: str = "month", date_str: str | None = None,
     d = api("User/Mydata/record_data_period_total", date=ds, ttype=ttype,
             sport_id=sid, ver=1, student_user_id=0, group_id=0)
     # 注意：明细里 total_distance 已是 km，total_time 是秒（与顶层 km/小时 不同）
+    items = d.get("period_list") or []
+    exact_secs = _series_total_seconds(items)
+
     series = [{"期": p.get("day_str") or p.get("period"),
                "距离_km": num(p.get("total_distance"), 2),
                "时长": hms(p.get("total_time")),
@@ -636,7 +644,7 @@ def t_get_period_stats(period: str = "month", date_str: str | None = None,
         "范围": d.get("time_section") or ds,
         "起止": f"{d.get('start_date')} ~ {d.get('end_date')}",
         "距离_km": num(d.get("total_distance"), 1),
-        "时长": hms((float(d.get("total_time") or 0)) * 3600),
+        "时长": hms(exact_secs) if exact_secs else hms((float(d.get("total_time") or 0)) * 3600),
         "次数": d.get("total_count"),
         "负荷": num(d.get("total_point"), 1),
         "平均配速": d.get("pace"),
