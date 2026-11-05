@@ -95,11 +95,63 @@ def test_format_helpers():
     check("速度过小返回 None", R.pace_str(0) is None)
 
 
+def test_codex_merge():
+    print("Codex TOML 合并")
+    import tempfile
+    import tomllib
+    from pathlib import Path
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import merge_codex_toml as M
+
+    d = Path(tempfile.mkdtemp())
+    f = d / "config.toml"
+    f.write_text(
+        '[model]\nname = "gpt-5"\n\n'
+        '[mcp_servers.rqrun] # existing\n'
+        'command = "/old/python"\n'
+        'args = [\n  "/old/rq_mcp.py",\n]\n'
+        'enabled = false\n'
+        'enabled_tools = ["a"]\n\n'
+        '[mcp_servers.other]\ncommand = "x"\n',
+        encoding="utf-8")
+
+    M.merge(str(f), "/new/python", "/new/rq_mcp.py")
+    text = f.read_text(encoding="utf-8")
+    data = tomllib.loads(text)
+    rq = data["mcp_servers"]["rqrun"]
+
+    check("路径已更新", rq["command"] == "/new/python")
+    check("超时更新为 600", rq["tool_timeout_sec"] == 600.0)
+    check("跨行 args 被整体替换", rq["args"] == ["/new/rq_mcp.py"])
+    check("保留 enabled=false", rq.get("enabled") is False)
+    check("保留 enabled_tools", rq.get("enabled_tools") == ["a"])
+    check("带行尾注释的表头不重复", text.count("[mcp_servers.rqrun]") == 1)
+    check("其它 MCP 段保留", data["mcp_servers"]["other"]["command"] == "x")
+    check("其它顶层段保留", data["model"]["name"] == "gpt-5")
+
+    f2 = d / "c2.toml"
+    f2.write_text("[a]\nx = 1\n", encoding="utf-8")
+    M.merge(str(f2), "/py", "/s.py")
+    data2 = tomllib.loads(f2.read_text(encoding="utf-8"))
+    check("没有该段时新增", "rqrun" in data2["mcp_servers"] and data2["a"]["x"] == 1)
+
+    f3 = d / "c3.toml"
+    f3.write_text("this is not toml\n", encoding="utf-8")
+    raised = False
+    try:
+        M.merge(str(f3), "/py", "/s.py")
+    except SystemExit:
+        raised = True
+    check("非法 TOML 拒绝修改且原样保留", raised and f3.read_text(encoding="utf-8") == "this is not toml\n")
+
+
 def main():
     test_sport_id()
     test_calendar_days()
     test_weekly_series()
     test_format_helpers()
+    test_codex_merge()
     print()
     if FAILS:
         print(f"❌ {len(FAILS)} 项失败: {FAILS}")

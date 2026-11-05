@@ -30,7 +30,8 @@ jobs:
           import ast, glob, json, pathlib, tomllib
           import xml.etree.ElementTree as ET
 
-          for f in ("rq_mcp.py", "scripts/smoke_test.py", "scripts/unit_tests.py"):
+          for f in ("rq_mcp.py", "scripts/smoke_test.py", "scripts/unit_tests.py",
+                    "scripts/merge_codex_toml.py"):
               ast.parse(pathlib.Path(f).read_text(encoding="utf-8"))
 
           # 防止一踩再踩：shell 里 $VAR 紧跟中文会被当成变量名的一部分（C locale 下直接报错）
@@ -104,23 +105,43 @@ jobs:
           print("ZCode：沿用 .agents，未屏蔽原有服务")
           PY
 
-      - name: Codex 已有配置时要更新而不是跳过
+      - name: Codex 更新时不得破坏配置（行尾注释 / 用户自定义字段）
         run: |
           export HOME="$(mktemp -d)"
           mkdir -p "$HOME/.codex"
           printf '%s\n' \
             '[model]' 'name = "gpt-5"' '' \
-            '[mcp_servers.rqrun]' 'command = "/old/python"' 'args = ["/old/rq_mcp.py"]' \
-            'tool_timeout_sec = 120.0' '' '[mcp_servers.other]' 'command = "x"' \
+            '[mcp_servers.rqrun] # existing' \
+            'command = "/old/python"' \
+            'args = [' '  "/old/rq_mcp.py",' ']' \
+            'enabled = false' 'enabled_tools = ["a"]' '' \
+            '[mcp_servers.other]' 'command = "x"' \
             > "$HOME/.codex/config.toml"
 
           ./install.sh --no-login --client=codex
 
-          grep -q 'tool_timeout_sec = 600.0' "$HOME/.codex/config.toml"
-          grep -q 'mcp_servers.other' "$HOME/.codex/config.toml"
-          grep -q 'name = "gpt-5"' "$HOME/.codex/config.toml"
-          test "$(grep -c '^\[mcp_servers.rqrun\]' "$HOME/.codex/config.toml")" = "1"
-          echo "Codex：旧配置被更新且其它段保留"
+          python3 - <<'PY'
+          import os, tomllib
+          p = f'{os.environ["HOME"]}/.codex/config.toml'
+          text = open(p, encoding='utf-8').read()
+          data = tomllib.loads(text)          # 必须仍是合法 TOML
+          rq = data['mcp_servers']['rqrun']
+          assert text.count('[mcp_servers.rqrun]') == 1, '重复定义了同一个表'
+          assert rq['tool_timeout_sec'] == 600.0, '超时未更新'
+          assert rq['args'] == [rq['args'][0]], 'args 未替换'
+          assert rq.get('enabled') is False, '用户的 enabled=false 被删'
+          assert rq.get('enabled_tools') == ['a'], '用户的 enabled_tools 被删'
+          assert data['mcp_servers']['other']['command'] == 'x'
+          assert data['model']['name'] == 'gpt-5'
+          print('Codex：更新正确，用户设置保留')
+          PY
+
+      - name: 未安装 DSH 时不得异常退出
+        run: |
+          export HOME="$(mktemp -d)"          # 完全没有 ~/.dsh
+          ./install.sh --no-login --client=all
+          test ! -e "$HOME/.dsh"
+          echo "未安装 DSH：正常跳过"
 
       - name: DSH 多 profile 时不得瞎写
         run: |

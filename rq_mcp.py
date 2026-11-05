@@ -1046,8 +1046,8 @@ def _chart_volume(weeks: int = 10, sport: str = "run") -> bytes:
             rows.append((day, float(r.get("distance") or 0) / 1000))
         if len(lst) < 100:
             break                        # 历史读完了
-        if oldest and oldest <= target_start:
-            break                        # 已覆盖到目标起始周
+        if oldest and oldest < target_start:
+            break                        # 严格更早，目标日当天的记录才不会被截断
         page += 1
     if not rows:
         raise RQError("没有可用的训练记录")
@@ -1061,8 +1061,14 @@ def _chart_volume(weeks: int = 10, sport: str = "run") -> bytes:
     bars = [{"label": f"{w['start'].month}/{w['start'].day}",
              "km": w["km"], "n": w["n"], "cur": w["current"]} for w in series]
 
-    this_month = date.today().strftime("%Y-%m")
-    m_km = sum(km_ for dt_, km_ in rows if dt_.strftime("%Y-%m") == this_month)
+    # 本月累计单独走周期接口：分页可能只回溯到本次请求的起始周，不能拿它当整月
+    month_start = today.replace(day=1)
+    try:
+        mstat = api("User/Mydata/record_data_period_total", date=today.strftime("%Y-%m"),
+                    ttype=2, sport_id=sid, ver=1, student_user_id=0, group_id=0)
+        m_km = float(mstat.get("total_distance") or 0)
+    except RQError:
+        m_km = sum(km_ for day_, km_ in rows if day_ >= month_start)
 
     W, H = 2000, 1180
     im = Image.new("RGB", (W, H), BG)

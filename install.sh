@@ -137,38 +137,9 @@ sys.exit(0 if isinstance(servers, dict) and servers else 1)
 PYEOF
 }
 
-# 写入或更新 Codex 的 [mcp_servers.rqrun] 段，保留文件里其它内容
+# 写入或更新 Codex 的 [mcp_servers.rqrun] 段（TOML 解析 → 合并 → 回验）
 write_codex_toml() { # $1=config.toml
-  "$VENV_PY" - "$1" "$VENV_PY" "$PY_SCRIPT" <<'PYEOF'
-import os, re, shutil, sys
-path, py, script = sys.argv[1], sys.argv[2], sys.argv[3]
-block = (
-    "[mcp_servers.rqrun]\n"
-    f'command = "{py}"\n'
-    f'args = ["{script}"]\n'
-    "startup_timeout_sec = 30.0\n"
-    "tool_timeout_sec = 600.0\n"
-)
-text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
-lines = text.splitlines()
-start = next((i for i, l in enumerate(lines)
-              if re.match(r"^\s*\[mcp_servers\.rqrun\]\s*$", l)), None)
-if start is None:
-    new = text.rstrip("\n") + ("\n\n" if text.strip() else "") + block
-    status = "新增"
-else:
-    end = len(lines)
-    for j in range(start + 1, len(lines)):
-        if re.match(r"^\s*\[", lines[j]):
-            end = j
-            break
-    new = "\n".join(lines[:start] + block.splitlines() + [""] + lines[end:]).rstrip("\n") + "\n"
-    status = "更新"
-if os.path.exists(path):
-    shutil.copy2(path, path + ".bak")
-open(path, "w", encoding="utf-8").write(new)
-print(f"  ✓ {path}（{status}）")
-PYEOF
+  "$VENV_PY" "$REPO_DIR/scripts/merge_codex_toml.py" "$1" "$VENV_PY" "$PY_SCRIPT"
 }
 
 # ---- Claude Code ----
@@ -231,7 +202,10 @@ fi
 # ---- DeepSeek Harness ----
 if want dsh; then
   DSH_PATCH=""
-  AVAILABLE="$(ls "$HOME/.dsh/profiles" 2>/dev/null | tr '\n' ' ')"
+  AVAILABLE=""
+  if [ -d "$HOME/.dsh/profiles" ]; then
+    AVAILABLE="$(ls "$HOME/.dsh/profiles" 2>/dev/null | tr '\n' ' ' || true)"
+  fi
   if [ -n "${DSH_PROFILE:-}" ]; then
     CAND="$HOME/.dsh/profiles/$DSH_PROFILE/cordis.patch.yml"
     if [ -f "$CAND" ]; then
