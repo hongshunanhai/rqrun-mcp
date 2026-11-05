@@ -30,8 +30,14 @@ jobs:
           import ast, glob, json, pathlib, tomllib
           import xml.etree.ElementTree as ET
 
-          ast.parse(pathlib.Path("rq_mcp.py").read_text(encoding="utf-8"))
-          ast.parse(pathlib.Path("scripts/smoke_test.py").read_text(encoding="utf-8"))
+          for f in ("rq_mcp.py", "scripts/smoke_test.py", "scripts/unit_tests.py"):
+              ast.parse(pathlib.Path(f).read_text(encoding="utf-8"))
+
+          # 防止一踩再踩：shell 里 $VAR 紧跟中文会被当成变量名的一部分（C locale 下直接报错）
+          import re
+          shell_bad = re.findall(r"\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7f]",
+                                 pathlib.Path("install.sh").read_text(encoding="utf-8"))
+          assert not shell_bad, f"变量后紧跟非 ASCII 字符，请改用 ${{VAR}}：{shell_bad[:5]}"
 
           files = (
               glob.glob("examples/*.json")
@@ -51,6 +57,9 @@ jobs:
           ./.venv/bin/python -m pip install --quiet --upgrade pip
           ./.venv/bin/python -m pip install --quiet -r requirements.txt
 
+      - name: 单元测试（纯逻辑，不联网）
+        run: ./.venv/bin/python scripts/unit_tests.py
+
       - name: MCP 协议冒烟测试
         run: ./.venv/bin/python scripts/smoke_test.py
 
@@ -64,8 +73,8 @@ jobs:
 
           test -f "$HOME/.workbuddy/mcp.json"
           test -f "$HOME/.zcode/cli/config.json"
-          test -f "$HOME/.agents/mcp.json"
           grep -q "mcp_servers.rqrun" "$HOME/.codex/config.toml"
+          grep -q "tool_timeout_sec" "$HOME/.codex/config.toml"
           grep -q "mcp-rqrun" "$HOME/.dsh/profiles/ci/cordis.patch.yml"
 
           # 幂等性：再跑一次不应产生重复条目
@@ -73,3 +82,17 @@ jobs:
           test "$(grep -c 'mcp_servers.rqrun' "$HOME/.codex/config.toml")" = "1"
           test "$(grep -c 'id: mcp-rqrun' "$HOME/.dsh/profiles/ci/cordis.patch.yml")" = "1"
           echo "安装器冒烟测试通过"
+
+      - name: 安装器不得覆盖已有的 .agents 配置
+        run: |
+          export HOME="$(mktemp -d)"
+          mkdir -p "$HOME/.agents"
+          printf '%s' '{"mcpServers":{"existing":{"command":"echo"}}}' > "$HOME/.agents/mcp.json"
+
+          ./install.sh --no-login --client=zcode
+
+          test -f "$HOME/.agents/mcp.json"
+          test ! -e "$HOME/.zcode/cli/config.json"
+          grep -q '"existing"' "$HOME/.agents/mcp.json"
+          grep -q '"rqrun"' "$HOME/.agents/mcp.json"
+          echo "ZCode 沿用 .agents 配置，未新建 .zcode"

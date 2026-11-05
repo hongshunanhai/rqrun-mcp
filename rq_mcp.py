@@ -173,6 +173,22 @@ def num(v, nd=1):
         return None
 
 
+
+def _sport_id(sport, default: str = "1") -> str:
+    """把 run/swim/ride/hike、或数字 sport_id 统一成接口需要的字符串。
+
+    非法值直接报错，避免"查骑行却返回跑步"这类静默错误。
+    """
+    if sport is None or str(sport).strip() == "":
+        return default
+    s = str(sport).strip().lower()
+    if s in SPORT_ID:
+        return SPORT_ID[s]
+    if s.isdigit() and s in SPORT:
+        return s
+    raise RQError(f"未知运动类型: {sport}（可用 run/swim/ride/hike 或 sport_id 1/2/3/9/99）")
+
+
 def compact(obj):
     """去掉 None 字段，压缩体积。"""
     if isinstance(obj, dict):
@@ -393,6 +409,39 @@ def _range1(days: int) -> str:
     return f"{start.isoformat()} ~ {end.isoformat()}"
 
 
+def _calendar_probe_dates(first: date, last: date) -> list:
+    """calendar_summary 一次只返回"包含指定日期的那一周"。
+
+    从 first 所在周的周一开始，每 7 天探测一次，保证覆盖 last 所在周的整段。
+    （此前从 first 本身开始累加，跨月时会漏掉月末那几天。）
+    """
+    cur = first - timedelta(days=first.weekday())
+    out = []
+    while cur <= last:
+        out.append(cur)
+        cur += timedelta(days=7)
+    return out
+
+
+def _weekly_series(rows, weeks: int, today: date | None = None) -> list:
+    """把 [(date, km)] 聚合成最近 weeks 个自然周，**包含休息周**。
+
+    返回按时间正序的列表，current 标记本周（可能是部分周）。
+    """
+    today = today or date.today()
+    curw = today - timedelta(days=today.weekday())
+    keys = [curw - timedelta(weeks=i) for i in range(weeks - 1, -1, -1)]
+    buckets: dict = {}
+    for d, km in rows:
+        buckets.setdefault(d - timedelta(days=d.weekday()), []).append(km)
+    return [{
+        "start": k,
+        "km": round(sum(buckets.get(k, [])), 1),
+        "n": len(buckets.get(k, [])),
+        "current": k == curw,
+    } for k in keys]
+
+
 def t_get_profile() -> dict:
     hr = api("Api/Profile/get_user_hr_data", **{"data[sport_id]": 1})
     try:
@@ -423,11 +472,14 @@ def t_get_profile() -> dict:
 
 def t_list_activities(start_date: str | None = None, end_date: str | None = None,
                       sport: str | None = None, limit: int = 10) -> dict:
-    sid = SPORT_ID.get((sport or "").lower()) if sport else None
-    if sport and sport.isdigit():
-        sid = sport
+    sid = _sport_id(sport, default="") or None
     rows, page, fetched = [], 1, 0
-    while len(rows) < limit and fetched < 500:
+    truncated = False
+    MAX_PAGES = 200          # 100 条/页 => 最多回看 2 万条
+    while len(rows) < limit:
+        if page > MAX_PAGES:
+            truncated = True
+            break
         d = api("User/Record/get_list", page=page, limit=100, period_type="all")
         lst = d.get("list") or []
         if not lst:
@@ -462,7 +514,11 @@ def t_list_activities(start_date: str | None = None, end_date: str | None = None
         if stop or (isinstance(total, int) and fetched >= total):
             break
         page += 1
-    return compact({"数量": len(rows), "记录": rows})
+    out = {"数量": len(rows), "记录": rows}
+    if truncated:
+        out["不完整"] = True
+        out["提示"] = "日期超出单次可回看的历史深度，结果可能不完整"
+    return compact(out)
 
 
 def t_get_activity(activity_id: str, include_streams: bool = False,
@@ -531,7 +587,7 @@ def t_get_activity(activity_id: str, include_streams: bool = False,
 def t_get_period_stats(period: str = "month", date_str: str | None = None,
                        sport: str | None = "run") -> dict:
     period = (period or "month").lower()
-    sid = SPORT_ID.get((sport or "run").lower(), "1")
+    sid = _sport_id(sport, "1")
     if period in ("all", "alltime", "total"):
         d = api("User/Mydata/record_data_all_total", student_user_id=0, group_id=0)
         return compact({
@@ -683,16 +739,14 @@ def t_get_calendar(month: str | None = None) -> dict:
     first = date(y, m, 1)
     last = date(y, m, _cal.monthrange(y, m)[1])
     days: dict[str, dict] = {}
-    cur = first
-    while cur <= last:
-        d = api("User/Calendar/calendar_summary", type=1, date=cur.isoformat(),
+    for probe in _calendar_probe_dates(first, last):
+        d = api("User/Calendar/calendar_summary", type=1, date=probe.isoformat(),
                 sport_id=0, student_user_id=0, group_id=0)
         for row in d.get("day_list") or []:
             for day in row.values():
                 ds = day.get("date")
                 if ds and first.isoformat() <= ds <= last.isoformat():
                     days[ds] = day
-        cur += timedelta(days=7)
     out_days = []
     for ds in sorted(days):
         day = days[ds]
@@ -735,17 +789,57 @@ HAIR = (239, 239, 242)
 _FONTS: dict = {}
 
 
+# 跨平台中文字体候选（按优先级）：macOS → Linux → Windows
+_FONT_BOLD_PATHS = [
+    "/System/Library/Fonts/STHeiti Medium.ttc",
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+    "C:/Windows/Fonts/msyhbd.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+]
+_FONT_REG_PATHS = [
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK.ttc",
+    "C:/Windows/Fonts/msyh.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "/System/Library/Fonts/STHeiti Medium.ttc",
+]
+_RESOLVED_FONT: dict = {}
+
+
+def _find_font(bold: bool):
+    cache_key = bool(bold)
+    if cache_key in _RESOLVED_FONT:
+        return _RESOLVED_FONT[cache_key]
+    import os as _os
+    for path in (_FONT_BOLD_PATHS if bold else _FONT_REG_PATHS):
+        if _os.path.exists(path):
+            _RESOLVED_FONT[cache_key] = path
+            return path
+    _RESOLVED_FONT[cache_key] = None
+    return None
+
+
 def _font(size: int, bold: bool = False):
     from PIL import ImageFont
     key = (size, bold)
     if key in _FONTS:
         return _FONTS[key]
-    path = ("/System/Library/Fonts/STHeiti Medium.ttc" if bold
-            else "/System/Library/Fonts/Hiragino Sans GB.ttc")
-    try:
-        f = ImageFont.truetype(path, size)
-    except Exception:
-        f = ImageFont.load_default()
+    path = _find_font(bold)
+    f = None
+    if path:
+        try:
+            f = ImageFont.truetype(path, size)
+        except Exception:
+            f = None
+    if f is None:
+        try:
+            f = ImageFont.load_default(size=size)
+        except TypeError:
+            f = ImageFont.load_default()
     _FONTS[key] = f
     return f
 
@@ -920,7 +1014,7 @@ def _chart_volume(weeks: int = 10, sport: str = "run") -> bytes:
     from PIL import Image, ImageDraw
     import io
 
-    sid = SPORT_ID.get((sport or "run").lower(), "1")
+    sid = _sport_id(sport, "1")
     rows, page = [], 1
     while page <= 5:
         d = api("User/Record/get_list", page=page, limit=100, period_type="all")
@@ -938,17 +1032,9 @@ def _chart_volume(weeks: int = 10, sport: str = "run") -> bytes:
     if not rows:
         raise RQError("没有可用的训练记录")
 
-    def monday(x):
-        return x - timedelta(days=x.weekday())
-
-    buckets: dict = {}
-    for dt_, km_ in rows:
-        buckets.setdefault(monday(dt_), []).append((dt_, km_))
-    keys = sorted(buckets)[-weeks:]
-    curw = monday(date.today())
-    bars = [{"label": f"{k.month}/{k.day}",
-             "km": round(sum(v[1] for v in buckets[k]), 1),
-             "n": len(buckets[k]), "cur": k == curw} for k in keys]
+    series = _weekly_series(rows, weeks)
+    bars = [{"label": f"{w['start'].month}/{w['start'].day}",
+             "km": w["km"], "n": w["n"], "cur": w["current"]} for w in series]
 
     this_month = date.today().strftime("%Y-%m")
     m_km = sum(km_ for dt_, km_ in rows if dt_.strftime("%Y-%m") == this_month)

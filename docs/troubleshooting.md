@@ -48,12 +48,20 @@
 /System/Library/Fonts/Hiragino Sans GB.ttc
 ```
 
-Linux 上可以装 `fonts-noto-cjk`；如果仍然不行，删掉 Pillow 用 `pip install --force-reinstall pillow` 重装。
+字体按下面顺序自动查找，装了任意一个即可：
+
+```
+macOS:   STHeiti Medium / Hiragino Sans GB
+Linux:   Noto Sans CJK（apt install fonts-noto-cjk）
+Windows: 微软雅黑（系统自带）
+```
+
+都没有时会退化成 Pillow 内置字体（中文变成方块）。
 
 ## 安装依赖失败
 
-- 需要 **Python 3.10+**，推荐 3.11–3.13
-- 某些系统 3.14 太新，`pillow` 没有预编译包，会尝试本地编译并失败；换 3.12 即可
+- 需要 **Python 3.11+**（`websockets 17` / `pillow 13` 的硬性要求），推荐 3.11–3.13
+- 3.14 实测可用，但生态较新；遇到编译问题换 3.12
 - 公司网络需要代理时，先 `export https_proxy=...` 再跑 `./install.sh`
 
 ## Apple Silicon 与 Intel

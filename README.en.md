@@ -61,7 +61,7 @@ cd rqrun-mcp
 The script does four things:
 
 ```
-[1/4] locate Python (3.10+)
+[1/4] locate Python (3.11+)
 [2/4] create .venv and install deps (mcp / websockets / pillow) — nothing system-wide
 [3/4] open a login window; you sign in once
 [4/4] detect installed clients and write their MCP config
@@ -146,10 +146,17 @@ Intentionally **not** exposed: sending SMS codes, deleting records, renaming, lo
 **Windows / Linux?** — the automatic login window is macOS-only. Elsewhere use:
 
 ```bash
-./.venv/bin/python rq_mcp.py login --manual   # paste the cookie manually
+# macOS / Linux
+./.venv/bin/python rq_mcp.py login --manual
+# Windows (PowerShell)
+.venv\Scripts\python.exe rq_mcp.py login --manual
 ```
 
-**Does it upload my data?** — No. The only outbound requests are to `rq.run` and (during install) PyPI.
+Note the interpreter path differs per platform: `.venv/bin/python` on macOS/Linux, `.venv\Scripts\python.exe` on Windows. Use the matching path as `command` in your MCP config.
+
+**Does it upload my data?** — The tool itself only talks to `rq.run`; there is no third-party relay. But the data it returns goes into **your AI client's conversation**, so a cloud model provider processes it under their terms — the same as pasting the numbers into the chat yourself.
+
+**Where is data stored locally?** `~/.rq-mcp/session.json` (session cookie, mode 600) and `~/.rq-mcp/chrome-profile/` (a dedicated browser profile used only for login; delete the folder to remove all of it).
 
 More: [`docs/troubleshooting.md`](docs/troubleshooting.md).
 

@@ -39,7 +39,7 @@ DSH 的 MCP 通过插件配置接入，有两种方式。
 
 仓库里的 `dsh-bundle/` 是一个只含配置的 bundle，适合分发给别人：
 
-1. 把 `dsh-bundle/cordis.patch.yml` 里的路径改成你机器上的实际路径
+1. 把 `dsh-bundle/cordis.patch.yml` 里的**三处**绝对路径（command、args、cwd）改成你机器上的值
 2. 让 DSH 里的 agent 安装这个目录，或通过插件管理界面导入
 3. 重启生效
 

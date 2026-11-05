@@ -2,4 +2,4 @@
 command = "/绝对路径/rqrun-mcp/.venv/bin/python"
 args = ["/绝对路径/rqrun-mcp/rq_mcp.py"]
 startup_timeout_sec = 30.0
-tool_timeout_sec = 120.0
+tool_timeout_sec = 600.0

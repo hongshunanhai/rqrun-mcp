@@ -51,7 +51,7 @@ step "[1/4] 检查 Python"
 PY=""
 CAND=()
 # 优先 3.10–3.13（3.14 太新，部分二进制包还没有 wheel）
-for n in python3.13 python3.12 python3.11 python3.10; do
+for n in python3.13 python3.12 python3.11; do
   p="$(command -v "$n" 2>/dev/null || true)"
   [ -n "$p" ] && CAND+=("$p")
 done
@@ -65,9 +65,9 @@ p="$(command -v python3 2>/dev/null || true)" && [ -n "$p" ] && CAND+=("$p")
 for c in "${CAND[@]}"; do
   [ -x "$c" ] || continue
   ver="$("$c" -c 'import sys;print(sys.version_info[0]*100+sys.version_info[1])' 2>/dev/null || echo 0)"
-  if [ "$ver" -ge 310 ] 2>/dev/null; then PY="$c"; break; fi
+  if [ "$ver" -ge 311 ] 2>/dev/null; then PY="$c"; break; fi
 done
-[ -n "$PY" ] || die "没有找到 Python 3.10+。请先安装：https://www.python.org/downloads/"
+[ -n "$PY" ] || die "没有找到 Python 3.11+（websockets 17 / pillow 13 需要）。请安装：https://www.python.org/downloads/"
 ok "$("$PY" -V 2>&1)  ($PY)"
 
 # --------------------------------------------------------------------------
@@ -150,6 +150,8 @@ if want codex; then
 [mcp_servers.rqrun]
 command = "$VENV_PY"
 args = ["$PY_SCRIPT"]
+startup_timeout_sec = 30.0
+tool_timeout_sec = 600.0
 EOF
       ok "Codex：已写入 $CO"
     fi
@@ -161,9 +163,18 @@ fi
 # ---- ZCode ----
 if want zcode; then
   if [ -d "$HOME/.zcode" ] || [ -d "$HOME/.agents" ] || command -v zcode >/dev/null 2>&1; then
-    merge_json "$HOME/.zcode/cli/config.json" zcode
-    merge_json "$HOME/.agents/mcp.json" mcpServers
-    ok "ZCode：已写入用户级配置（也可在 设置→MCP 里点「导入」自动发现）"
+    ZC="$HOME/.zcode/cli/config.json"
+    AG="$HOME/.agents/mcp.json"
+    if [ -f "$ZC" ] || [ ! -f "$AG" ]; then
+      # ZCode 原生配置（面板里可见）
+      merge_json "$ZC" zcode
+      ok "ZCode：已写入 $ZC"
+      [ -f "$AG" ] && warn "注意：你还有 ${AG}；按 ZCode 规则它会因 .zcode 存在而整体失效"
+    else
+      # 已有 .agents 兜底配置：写这里，避免新建 .zcode 把原有服务全部顶掉
+      merge_json "$AG" mcpServers
+      ok "ZCode：已写入 ${AG}（沿用你原有的 .agents 配置，未新建 .zcode）"
+    fi
   else
     warn "ZCode：未检测到 ~/.zcode（未安装 ZCode）"
   fi
@@ -182,9 +193,21 @@ fi
 # ---- DeepSeek Harness ----
 if want dsh; then
   DSH_PATCH=""
-  for p in "$HOME/.dsh/profiles"/*/cordis.patch.yml; do
-    [ -f "$p" ] && DSH_PATCH="$p" && break
-  done
+  if [ -n "${DSH_PROFILE:-}" ] && [ -f "$HOME/.dsh/profiles/$DSH_PROFILE/cordis.patch.yml" ]; then
+    # 优先用当前会话的 profile
+    DSH_PATCH="$HOME/.dsh/profiles/$DSH_PROFILE/cordis.patch.yml"
+  else
+    COUNT=0
+    for p in "$HOME"/.dsh/profiles/*/cordis.patch.yml; do
+      [ -f "$p" ] || continue
+      COUNT=$((COUNT + 1))
+      DSH_PATCH="$p"
+    done
+    if [ "$COUNT" -gt 1 ]; then
+      warn "检测到 $COUNT 个 DSH profile，已选最后一个：$DSH_PATCH"
+      warn "若有多个 profile，请用  DSH_PROFILE=<名字> ./install.sh --client=dsh  指定"
+    fi
+  fi
   if [ -n "$DSH_PATCH" ]; then
     if grep -q 'id: mcp-rqrun' "$DSH_PATCH" 2>/dev/null; then
       ok "DeepSeek Harness：已配置过 mcp-rqrun"

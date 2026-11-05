@@ -2,8 +2,6 @@
 
 [中文](README.md) | [English](README.en.md)
 
-![CI](https://github.com/<你的GitHub用户名>/rqrun-mcp/actions/workflows/ci.yml/badge.svg)
-
 把 **RQrun（rq.run）** 的训练数据接进你的 AI 助手，让它直接回答「我今年跑了多少」「分析一下我昨天那次跑步」「我这周是不是练过量了」。
 
 > 只读。不会修改或删除你的任何记录，**也永远不接触你的账号密码**。
@@ -63,7 +61,7 @@ cd rqrun-mcp
 脚本会自动完成四件事：
 
 ```
-[1/4] 找 Python（3.10+）
+[1/4] 找 Python（3.11+）
 [2/4] 建 .venv 并装依赖（mcp / websockets / pillow，不污染系统）
 [3/4] 弹出登录窗口 → 你正常登录一次
 [4/4] 自动检测并写入各客户端配置
@@ -135,9 +133,24 @@ python3 -m venv .venv
 
 ## 隐私
 
-- 所有请求从**你本机**直接发往 `rq.run`，不经过任何第三方服务器
-- 凭据只存在 `~/.rq-mcp/session.json`（权限 600），不写入仓库
-- 仓库里没有任何用户数据；`.gitignore` 已排除 `.venv/`、`session.json`、`charts/`
+**数据的流向要说清楚：**
+
+```
+你的机器 ──请求──▶ rq.run（RQrun 官方服务器）
+   │
+   └──工具返回的训练数据/图表──▶ 你使用的 AI 客户端 ──▶ 模型服务商
+```
+
+也就是说：本工具本身不经过任何第三方服务器，但**工具返回的数据会进入你所用 AI 客户端的对话**。如果你用的是云端模型（DeepSeek、Claude、GPT 等），这部分数据会按该服务商的条款被提交处理——这点和你把跑步数据手动贴进对话框没有区别。
+
+**本机保存的东西：**
+
+| 位置 | 内容 | 说明 |
+|---|---|---|
+| `~/.rq-mcp/session.json` | 会话 Cookie（权限 600） | 删除即退出登录 |
+| `~/.rq-mcp/chrome-profile/` | 登录用的独立 Chrome 配置目录 | 含该浏览器的缓存、站点数据，不再需要可整个删除 |
+
+仓库里没有任何用户数据；`.gitignore` 已排除 `.venv/`、`session.json`、`charts/`、本地 bundle。
 
 ---
 
@@ -147,11 +160,23 @@ python3 -m venv .venv
 A：在对话里说「登录 RQrun」，或重跑 `./install.sh`。
 
 **Q：Windows / Linux 能用吗？**
-A：可以，但自动弹窗登录目前只支持 macOS。其它系统用兜底方式：
+A：可以，但**自动弹窗登录目前只支持 macOS**。其它系统用兜底方式：
 
 ```bash
-./.venv/bin/python rq_mcp.py login --manual   # 手动粘贴 Cookie
+# macOS / Linux
+./.venv/bin/python rq_mcp.py login --manual
+# Windows（PowerShell）
+.venv\Scripts\python.exe rq_mcp.py login --manual
 ```
+
+注意各平台虚拟环境里的解释器路径不同：
+
+| 平台 | Python 路径 |
+|---|---|
+| macOS / Linux | `.venv/bin/python` |
+| Windows | `.venv\Scripts\python.exe` |
+
+配置 MCP 时 `command` 要填对应平台的路径。Windows 的安装脚本暂未提供，按上表手动配置即可。
 
 **Q：会不会把我的数据传出去？**
 A：不会。代码只有两个外部请求：`rq.run` 和（首次安装时的）PyPI。
