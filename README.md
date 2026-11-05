@@ -1,5 +1,9 @@
 # RQrun MCP
 
+[中文](README.md) | [English](README.en.md)
+
+![CI](https://github.com/<你的GitHub用户名>/rqrun-mcp/actions/workflows/ci.yml/badge.svg)
+
 把 **RQrun（rq.run）** 的训练数据接进你的 AI 助手，让它直接回答「我今年跑了多少」「分析一下我昨天那次跑步」「我这周是不是练过量了」。
 
 > 只读。不会修改或删除你的任何记录，**也永远不接触你的账号密码**。
@@ -164,13 +168,25 @@ A：目前是单文件 Python + venv，好处是不依赖 Node 生态、跑友�
 ```
 rqrun-mcp/
 ├── rq_mcp.py            # 服务端主文件（登录 + 10 个工具 + 画图）
-├── install.sh           # 一键安装器
+├── install.sh           # 一键安装器（自动配置 5 个客户端）
 ├── install.command      # macOS 双击版
 ├── requirements.txt
-├── docs/                # 各客户端接入说明
+├── scripts/
+│   └── smoke_test.py    # CI 用的协议冒烟测试
+├── docs/                # 各客户端接入说明 + 排错
 ├── examples/            # 可直接复制的配置样例
-└── dsh-bundle/          # DeepSeek Harness 的 bundle 形式安装包
+├── dsh-bundle/          # DeepSeek Harness 的 bundle 形式安装包
+└── .github/workflows/   # CI：静态检查 + 冒烟测试 + 安装器测试
 ```
+
+## 开发
+
+```bash
+./.venv/bin/python scripts/smoke_test.py    # 验证服务端接口是否齐全
+bash -n install.sh                          # 检查安装脚本语法
+```
+
+CI 会在 Ubuntu 和 macOS 上各跑一遍：静态检查 → MCP 握手 → 安装器在干净 HOME 下的写入与幂等性。
 
 ---
 
