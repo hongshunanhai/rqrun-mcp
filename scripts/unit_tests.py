@@ -146,12 +146,56 @@ def test_codex_merge():
     check("非法 TOML 拒绝修改且原样保留", raised and f3.read_text(encoding="utf-8") == "this is not toml\n")
 
 
+def test_chart_pagination_boundary():
+    """用假 API 验证两个边界：
+    1) 目标起始周当天有 100+ 条记录时，不能读完第一页就停
+    2) 本月累计来自周期接口，而不是分页读到的部分记录
+    """
+    print("周跑量分页边界（假 API）")
+    from datetime import date, timedelta
+
+    today = date.today()
+    curw = today - timedelta(days=today.weekday())
+    target_start = curw - timedelta(days=7)      # weeks=2
+    calls = {"list": 0, "month": 0}
+
+    def fake_api(action, **kw):
+        if action == "User/Record/get_list":
+            calls["list"] += 1
+            if calls["list"] == 1:               # 整页都是起始周周一
+                return {"total": 500, "list": [
+                    {"training_at": f"{target_start} 08:00:00",
+                     "sport_id": "1", "distance": "1000"} for _ in range(100)]}
+            if calls["list"] == 2:               # 第二页才出现更早的记录
+                older = target_start - timedelta(days=1)
+                return {"total": 500, "list": [
+                    {"training_at": f"{older} 08:00:00",
+                     "sport_id": "1", "distance": "2000"}]}
+            return {"total": 500, "list": []}
+        if action == "User/Mydata/record_data_period_total":
+            calls["month"] += 1
+            return {"total_distance": 17.8}
+        raise AssertionError(f"未预期的接口调用: {action}")
+
+    original = R.api
+    R.api = fake_api
+    try:
+        png = R._chart_volume(2)
+    finally:
+        R.api = original
+
+    check("起始周当天满页时继续翻页", calls["list"] >= 2, f"只调用了 {calls['list']} 次")
+    check("本月累计单独查询周期接口", calls["month"] == 1)
+    check("图表仍能正常生成", isinstance(png, bytes) and len(png) > 1000)
+
+
 def main():
     test_sport_id()
     test_calendar_days()
     test_weekly_series()
     test_format_helpers()
     test_codex_merge()
+    test_chart_pagination_boundary()
     print()
     if FAILS:
         print(f"❌ {len(FAILS)} 项失败: {FAILS}")
