@@ -486,6 +486,7 @@ def t_list_activities(start_date: str | None = None, end_date: str | None = None
         d = api("User/Record/get_list", page=page, limit=100, period_type="all")
         lst = d.get("list") or []
         if not lst:
+            history_complete = True
             break
         fetched += len(lst)
         stop = False
@@ -613,7 +614,7 @@ def t_get_period_stats(period: str = "month", date_str: str | None = None,
             "分年": [{"年": p.get("period"), "距离_km": p.get("total_distance"),
                       "配速": p.get("pace"), "负荷": num(p.get("total_point"), 1),
                       "跑力": p.get("last_runlevel")}
-                     for p in items],
+                     for p in (d.get("period_list") or [])],
         })
     today = date.today()
     ttype = {"year": 1, "month": 2, "week": 3, "custom": 4}.get(period, 2)
@@ -638,7 +639,7 @@ def t_get_period_stats(period: str = "month", date_str: str | None = None,
                "时长": hms(p.get("total_time")),
                "负荷": num(p.get("total_point"), 1),
                "次数": p.get("count")}
-              for p in (d.get("period_list") or [])]
+              for p in items]
     series = [s for s in series if (s.get("距离_km") or 0) > 0][-30:]
     return compact({
         "范围": d.get("time_section") or ds,
@@ -1021,7 +1022,7 @@ def _chart_activity(activity_id: str) -> bytes:
     return buf.getvalue()
 
 
-def _month_total_km(today, sid, rows, oldest):
+def _month_total_km(today, sid, rows, oldest, history_complete=False):
     """本月累计。
 
     正常走周期接口；接口失败时**只有确认分页已覆盖到月初**才用本地求和，
@@ -1033,7 +1034,10 @@ def _month_total_km(today, sid, rows, oldest):
                  ttype=2, sport_id=sid, ver=1, student_user_id=0, group_id=0)
         return float(st.get("total_distance") or 0), ""
     except RQError:
-        if oldest is not None and oldest <= month_start:
+        # 只有"确认月初当天的记录也全读完了"才能本地求和：
+        #   history_complete    -> 历史已读完，天然覆盖整月
+        #   oldest < month_start -> 严格更早，说明月初当天已翻页翻完
+        if history_complete or (oldest is not None and oldest < month_start):
             return sum(km for d, km in rows if d >= month_start), ""
         return None, "暂不可用"
 
@@ -1052,7 +1056,7 @@ def _chart_volume(weeks: int = 10, sport: str = "run") -> bytes:
     curw = today - timedelta(days=today.weekday())
     target_start = curw - timedelta(weeks=weeks - 1)
 
-    rows, page, oldest, hit_cap = [], 1, None, False
+    rows, page, oldest, hit_cap, history_complete = [], 1, None, False, False
     MAX_PAGES = 200                      # 100 条/页 => 最多回看 2 万条
     while True:
         if page > MAX_PAGES:
@@ -1070,6 +1074,7 @@ def _chart_volume(weeks: int = 10, sport: str = "run") -> bytes:
                 continue
             rows.append((day, float(r.get("distance") or 0) / 1000))
         if len(lst) < 100:
+            history_complete = True
             break                        # 历史读完了
         if oldest and oldest < target_start:
             break                        # 严格更早，目标日当天的记录才不会被截断
@@ -1087,7 +1092,7 @@ def _chart_volume(weeks: int = 10, sport: str = "run") -> bytes:
              "km": w["km"], "n": w["n"], "cur": w["current"]} for w in series]
 
     # 本月累计单独走周期接口；失败时不会拿部分数据冒充整月
-    month_km, month_note = _month_total_km(today, sid, rows, oldest)
+    month_km, month_note = _month_total_km(today, sid, rows, oldest, history_complete)
 
     W, H = 2000, 1180
     im = Image.new("RGB", (W, H), BG)

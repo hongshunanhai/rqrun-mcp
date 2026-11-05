@@ -203,6 +203,36 @@ def test_chart_pagination_boundary():
     check("图表仍能正常生成", isinstance(png, bytes) and len(png) > 1000)
 
 
+def test_period_all_branch():
+    """生涯分支曾因变量提前引用而崩溃，用假数据把三个别名都覆盖一遍。"""
+    print("生涯统计分支")
+    payload = {
+        "total_distance": 921.2, "total_time": 114.1, "total_count": 142,
+        "total_point": 2195.2, "pace": "7'26\"", "avg_hr": 149,
+        "last_runlevel": 37.7, "user_rq_level": "中阶级跑者", "join_days": 489,
+        "total_marathon_count": 0,
+        "period_list": [
+            {"period": 2026, "total_distance": 471.3, "pace": "6'58\"",
+             "total_point": 1024.6, "last_runlevel": "37.7"},
+            {"period": 2025, "total_distance": 449.9, "pace": "7'55\"",
+             "total_point": 1170.6, "last_runlevel": "31.8"},
+        ],
+    }
+    original = R.api
+    R.api = lambda action, **kw: payload if action == "User/Mydata/record_data_all_total" \
+        else (_ for _ in ()).throw(AssertionError(action))
+    try:
+        for alias in ("all", "alltime", "total"):
+            try:
+                d = R.t_get_period_stats(alias)
+                ok = d["总距离_km"] == 921.2 and len(d["分年"]) == 2
+                check(f"period={alias} 正常返回", ok, d.get("分年"))
+            except Exception as e:                       # noqa: BLE001
+                check(f"period={alias} 正常返回", False, repr(e))
+    finally:
+        R.api = original
+
+
 def test_series_seconds():
     print("周期时长求和")
     items = [{"total_time": 2567}, {"total_time": 2084}, {"total_time": 2415}]
@@ -230,6 +260,16 @@ def test_month_total_fallback():
         val, note = R._month_total_km(today, "1", [(today, 5.0)], oldest=today)
         check("未覆盖月初时返回不可用", val is None and note == "暂不可用", (val, note))
 
+        # 恰好停在月初当天：读到了，但不能证明当天已读完 -> 仍不可用
+        val_b, note_b = R._month_total_km(today, "1", [(month_start, 5.0)],
+                                          oldest=month_start, history_complete=False)
+        check("停在月初当天时不兜底", val_b is None and note_b == "暂不可用", (val_b, note_b))
+
+        # 历史已确认读完 -> 可以兜底
+        val_c, _ = R._month_total_km(today, "1", [(month_start, 5.0)],
+                                     oldest=month_start, history_complete=True)
+        check("历史读完时可兜底", val_c == 5.0, val_c)
+
         # 已覆盖到月初 -> 可以用本地求和兜底
         rows = [(month_start, 6.0), (today, 5.0)]
         val2, note2 = R._month_total_km(today, "1", rows, oldest=month_start - timedelta(days=3))
@@ -246,6 +286,7 @@ def main():
     test_codex_merge()
     test_chart_pagination_boundary()
     test_month_total_fallback()
+    test_period_all_branch()
     test_series_seconds()
     print()
     if FAILS:
