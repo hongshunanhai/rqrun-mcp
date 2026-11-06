@@ -164,25 +164,42 @@ jobs:
           test "$(grep -c 'mcp-rqrun' "$HOME/.dsh/profiles/alpha/cordis.patch.yml")" = "0"
           echo "DSH：多 profile 跳过、指定不存在跳过、指定正确只写一个"
 
-      - name: YAML 末尾无换行时不得粘行
+      - name: DSH patch 的各种输入形态都要正确注册
         run: |
           export HOME="$(mktemp -d)"
           unset DSH_PROFILE
-          mkdir -p "$HOME/.dsh/profiles/solo"
+
+          # a) 合法空列表 []（曾报告成功但什么都没注册）
+          mkdir -p "$HOME/.dsh/profiles/a"
+          printf '%s' '[]' > "$HOME/.dsh/profiles/a/cordis.patch.yml"
+
+          # b) 只有注释，且注释里有同名 id
+          mkdir -p "$HOME/.dsh/profiles/b"
+          printf '%s\n' '# note' '# id: mcp-rqrun' > "$HOME/.dsh/profiles/b/cordis.patch.yml"
+
+          # c) 最后一行没有换行
+          mkdir -p "$HOME/.dsh/profiles/c"
           printf -- '- id: existing\n  config:\n    provider: deepseek-account' \
-            > "$HOME/.dsh/profiles/solo/cordis.patch.yml"
+            > "$HOME/.dsh/profiles/c/cordis.patch.yml"
 
-          ./install.sh --no-login --client=dsh
+          DSH_PROFILE=a ./install.sh --no-login --client=dsh
+          DSH_PROFILE=b ./install.sh --no-login --client=dsh
+          DSH_PROFILE=c ./install.sh --no-login --client=dsh
 
-          python3 - <<'PY'
-          import os, re
-          p = f'{os.environ["HOME"]}/.dsh/profiles/solo/cordis.patch.yml'
-          text = open(p, encoding='utf-8').read()
-          assert text.endswith("\n"), "结果没有以换行结尾"
-          assert "-account- id:" not in text, "新条目和上一行粘在一起了"
-          assert text.count("- id: mcp-rqrun") == 1, "条目数量不对"
-          assert "- id: existing" in text, "原有条目丢失"
-          print("DSH：无换行 YAML 追加安全")
+          ./.venv/bin/python - <<'PY'
+          import os
+          from ruamel.yaml import YAML
+          home = os.environ["HOME"]
+          expected = {"a": [], "b": [], "c": ["existing"]}
+          for key, before in expected.items():
+              p = f"{home}/.dsh/profiles/{key}/cordis.patch.yml"
+              text = open(p, encoding="utf-8").read()
+              data = YAML().load(text)
+              ids = [i.get("id") for i in data if isinstance(i, dict)]
+              assert ids == before + ["mcp-rqrun"], f"{key}: {ids}"
+              if key == "c":
+                  assert "-account- id:" not in text, "新条目和上一行粘在一起"
+          print("DSH：[]、纯注释、无换行三种输入都正确注册")
           PY
 
       - name: 发布自检脚本可运行

@@ -290,35 +290,64 @@ def test_incomplete_note():
 
 
 def test_append_dsh_patch():
-    print("DSH patch 追加")
+    print("DSH patch 合并")
     import tempfile
     from pathlib import Path
 
     sys.path.insert(0, str(ROOT / "scripts"))
     import append_dsh_patch as A
+    from ruamel.yaml import YAML
+
+    def load(path):
+        return YAML().load(Path(path).read_text(encoding="utf-8"))
+
+    def ids(data):
+        return [i.get("id") for i in (data or []) if isinstance(i, dict)]
 
     d = Path(tempfile.mkdtemp())
 
-    # 最后一行没有换行符：最容易粘行的情况
-    f = d / "no_newline.yml"
-    f.write_text('- id: existing\n  config:\n    provider: deepseek-account', encoding="utf-8")
+    # 1) 合法空列表 []（曾导致"报告成功但没注册"）
+    f = d / "empty_list.yml"
+    f.write_text("[]\n", encoding="utf-8")
+    A.append(str(f), "/py", "/s.py")
+    check("空列表 [] 能正确追加", ids(load(f)) == ["mcp-rqrun"], ids(load(f)))
+
+    # 2) 只有注释，且注释里出现同名 id（不能被误判为已安装）
+    f = d / "comment_only.yml"
+    f.write_text("# 说明\n# id: mcp-rqrun\n", encoding="utf-8")
+    status = A.append(str(f), "/py", "/s.py")
+    check("注释里的同名 id 不算已安装", status == "added" and ids(load(f)) == ["mcp-rqrun"])
+
+    # 3) 追加到已有条目之后，保留原条目与头部注释
+    f = d / "with_entries.yml"
+    f.write_text("# 头注释\n- id: existing\n  config:\n    provider: deepseek-account\n",
+                 encoding="utf-8")
     A.append(str(f), "/py", "/s.py")
     text = f.read_text(encoding="utf-8")
-    check("补上了换行且不粘行", "-account- id:" not in text and text.endswith("\n"))
-    check("新条目存在且唯一", text.count("- id: mcp-rqrun") == 1)
-    check("原有条目保留", "- id: existing" in text)
-    check("有空行分隔", "\n\n- id: mcp-rqrun" in text)
+    check("原有条目保留且顺序在前", ids(load(f)) == ["existing", "mcp-rqrun"], ids(load(f)))
+    check("头部注释保留", "# 头注释" in text)
+    check("没粘行", "-account- id:" not in text)
 
-    # 已经有该条目：不重复写
+    # 4) 末尾无换行
+    f = d / "no_newline.yml"
+    f.write_text("- id: existing\n  config:\n    x: 1", encoding="utf-8")
+    A.append(str(f), "/py", "/s.py")
+    check("无换行文件也能追加", ids(load(f)) == ["existing", "mcp-rqrun"])
+
+    # 5) 已存在（按解析结果）则不重复写
     before = f.read_text(encoding="utf-8")
     status = A.append(str(f), "/py", "/s.py")
-    check("已存在时不重复追加", status == "already" and f.read_text(encoding="utf-8") == before)
+    check("已安装时不重复追加", status == "already" and f.read_text(encoding="utf-8") == before)
 
-    # 空文件
-    f2 = d / "empty.yml"
-    f2.write_text("", encoding="utf-8")
-    A.append(str(f2), "/py", "/s.py")
-    check("空文件可直接写入", f2.read_text(encoding="utf-8").startswith("- id: mcp-rqrun"))
+    # 6) 顶层不是列表要拒绝
+    f = d / "bad.yml"
+    f.write_text("key: value\n", encoding="utf-8")
+    raised = False
+    try:
+        A.append(str(f), "/py", "/s.py")
+    except SystemExit:
+        raised = True
+    check("顶层非列表时拒绝", raised and f.read_text(encoding="utf-8") == "key: value\n")
 
 
 def main():
