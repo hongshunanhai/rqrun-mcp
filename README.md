@@ -206,12 +206,23 @@ rqrun-mcp/
 
 ## 开发
 
+**发布前跑一次自检**（推荐）：
+
 ```bash
-./.venv/bin/python scripts/smoke_test.py    # 验证服务端接口是否齐全
-bash -n install.sh                          # 检查安装脚本语法
+./scripts/preflight.sh
 ```
 
-CI 会在 Ubuntu 和 macOS 上各跑一遍：静态检查 → MCP 握手 → 安装器在干净 HOME 下的写入与幂等性。
+它会依次检查：shell 语法、**是否有未提交的改动**、跟踪文件里有没有 Cookie 或个人绝对路径、单元测试、MCP 握手。任何一项不过都会以非零码退出。
+
+单独跑某一项：
+
+```bash
+./.venv/bin/python scripts/unit_tests.py   # 纯逻辑单测（57 项，不联网）
+./.venv/bin/python scripts/smoke_test.py   # MCP 协议握手 + 工具清单
+bash -n install.sh                         # 安装脚本语法
+```
+
+CI 会在 Ubuntu 和 macOS 上各跑一遍：静态检查 → 单元测试 → MCP 握手 → 安装器在干净 HOME 下的写入、幂等与不覆盖性。
 
 ---
 
