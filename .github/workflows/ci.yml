@@ -175,7 +175,7 @@ jobs:
 
           # b) 只有注释，且注释里有同名 id
           mkdir -p "$HOME/.dsh/profiles/b"
-          printf '%s\n' '# note' '# id: mcp-rqrun' > "$HOME/.dsh/profiles/b/cordis.patch.yml"
+          printf '%s\n' '# note-keep-me' '# id: mcp-rqrun' > "$HOME/.dsh/profiles/b/cordis.patch.yml"
 
           # c) 最后一行没有换行
           mkdir -p "$HOME/.dsh/profiles/c"
@@ -197,6 +197,8 @@ jobs:
               data = YAML().load(text)
               ids = [i.get("id") for i in data if isinstance(i, dict)]
               assert ids == before + ["mcp-rqrun"], f"{key}: {ids}"
+              if key == "b":
+                  assert "# note-keep-me" in text, "纯注释文件的注释被丢弃"
               if key == "c":
                   assert "-account- id:" not in text, "新条目和上一行粘在一起"
           print("DSH：[]、纯注释、无换行三种输入都正确注册")

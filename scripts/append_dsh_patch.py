@@ -48,13 +48,18 @@ def build_entry(python_path: str, script_path: str) -> CommentedMap:
 
 
 def _load(text: str):
+    """返回 (数据, 原文是否没有任何 YAML 结构)。
+
+    纯注释文件解析结果是 None —— 注释挂在 token 流上、没有节点承载，
+    这种情况需要保留原文，不能直接丢掉。
+    """
     y = _yaml()
     data = y.load(text) if text.strip() else None
     if data is None:
-        return CommentedSeq()
+        return CommentedSeq(), True
     if not isinstance(data, CommentedSeq):
         raise SystemExit(f"  ✗ 顶层不是 YAML 列表（实际是 {type(data).__name__}），已跳过")
-    return data
+    return data, False
 
 
 def _has_entry(data) -> bool:
@@ -63,19 +68,30 @@ def _has_entry(data) -> bool:
 
 def append(path: str, python_path: str, script_path: str) -> str:
     text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
-    data = _load(text)
+    data, structureless = _load(text)
 
     if _has_entry(data):
         return "already"
 
-    data.append(build_entry(python_path, script_path))
-
-    buf = io.StringIO()
-    _yaml().dump(data, buf)
-    new_text = buf.getvalue()
+    if structureless and text.strip():
+        # 原文只有注释/空行：把原文整体作为前缀保留，新条目接在后面。
+        # 此时没有任何 YAML 结构可破坏，不存在粘行或覆盖问题。
+        entry_seq = CommentedSeq()
+        entry_seq.append(build_entry(python_path, script_path))
+        buf = io.StringIO()
+        _yaml().dump(entry_seq, buf)
+        prefix = text if text.endswith("\n") else text + "\n"
+        if not prefix.endswith("\n\n"):
+            prefix += "\n"
+        new_text = prefix + buf.getvalue()
+    else:
+        data.append(build_entry(python_path, script_path))
+        buf = io.StringIO()
+        _yaml().dump(data, buf)
+        new_text = buf.getvalue()
 
     # 回验：重新解析，确认条目真的在列表里
-    check = _load(new_text)
+    check, _ = _load(new_text)
     if not _has_entry(check):
         raise SystemExit("  ✗ 写入结果中找不到 mcp-rqrun，已放弃写入")
 

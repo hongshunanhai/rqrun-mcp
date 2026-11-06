@@ -312,11 +312,21 @@ def test_append_dsh_patch():
     A.append(str(f), "/py", "/s.py")
     check("空列表 [] 能正确追加", ids(load(f)) == ["mcp-rqrun"], ids(load(f)))
 
-    # 2) 只有注释，且注释里出现同名 id（不能被误判为已安装）
+    # 2) 只有注释，且注释里出现同名 id（不能被误判为已安装，注释也不能丢）
     f = d / "comment_only.yml"
     f.write_text("# 说明\n# id: mcp-rqrun\n", encoding="utf-8")
     status = A.append(str(f), "/py", "/s.py")
+    text2 = f.read_text(encoding="utf-8")
     check("注释里的同名 id 不算已安装", status == "added" and ids(load(f)) == ["mcp-rqrun"])
+    check("纯注释文件的注释被保留", "# 说明" in text2 and "# id: mcp-rqrun" in text2, text2[:40])
+
+    # 2b) 多段注释 + 空行
+    f2b = d / "comments_multi.yml"
+    f2b.write_text("# 头注释\n\n# 第二段\n", encoding="utf-8")
+    A.append(str(f2b), "/py", "/s.py")
+    text2b = f2b.read_text(encoding="utf-8")
+    check("多段注释都保留",
+          "# 头注释" in text2b and "# 第二段" in text2b and ids(load(f2b)) == ["mcp-rqrun"])
 
     # 3) 追加到已有条目之后，保留原条目与头部注释
     f = d / "with_entries.yml"
