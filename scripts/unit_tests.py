@@ -278,6 +278,49 @@ def test_month_total_fallback():
         R.api = original
 
 
+def test_incomplete_note():
+    print("图表不完整提示")
+    from datetime import date
+    start = date(2026, 10, 26)
+    check("未触顶不提示", R._incomplete_note(False, start, start) == "")
+    check("触顶且日期相等要提示", R._incomplete_note(True, start, start) != "")
+    check("触顶且更晚要提示", R._incomplete_note(True, date(2026, 11, 2), start) != "")
+    check("触顶但已严格更早不提示", R._incomplete_note(True, date(2026, 10, 25), start) == "")
+    check("触顶且无数据要提示", R._incomplete_note(True, None, start) != "")
+
+
+def test_append_dsh_patch():
+    print("DSH patch 追加")
+    import tempfile
+    from pathlib import Path
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import append_dsh_patch as A
+
+    d = Path(tempfile.mkdtemp())
+
+    # 最后一行没有换行符：最容易粘行的情况
+    f = d / "no_newline.yml"
+    f.write_text('- id: existing\n  config:\n    provider: deepseek-account', encoding="utf-8")
+    A.append(str(f), "/py", "/s.py")
+    text = f.read_text(encoding="utf-8")
+    check("补上了换行且不粘行", "-account- id:" not in text and text.endswith("\n"))
+    check("新条目存在且唯一", text.count("- id: mcp-rqrun") == 1)
+    check("原有条目保留", "- id: existing" in text)
+    check("有空行分隔", "\n\n- id: mcp-rqrun" in text)
+
+    # 已经有该条目：不重复写
+    before = f.read_text(encoding="utf-8")
+    status = A.append(str(f), "/py", "/s.py")
+    check("已存在时不重复追加", status == "already" and f.read_text(encoding="utf-8") == before)
+
+    # 空文件
+    f2 = d / "empty.yml"
+    f2.write_text("", encoding="utf-8")
+    A.append(str(f2), "/py", "/s.py")
+    check("空文件可直接写入", f2.read_text(encoding="utf-8").startswith("- id: mcp-rqrun"))
+
+
 def main():
     test_sport_id()
     test_calendar_days()
@@ -288,6 +331,8 @@ def main():
     test_month_total_fallback()
     test_period_all_branch()
     test_series_seconds()
+    test_incomplete_note()
+    test_append_dsh_patch()
     print()
     if FAILS:
         print(f"❌ {len(FAILS)} 项失败: {FAILS}")

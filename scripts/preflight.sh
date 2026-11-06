@@ -32,8 +32,14 @@ if [ -n "${USER:-}" ] && git grep -q "/Users/${USER}/" -- . 2>/dev/null; then
 else
   ok "无个人绝对路径"
 fi
-if git ls-files -z | xargs -0 -I{} sh -c 'test "$(stat -f%z "{}" 2>/dev/null || stat -c%s "{}" 2>/dev/null || echo 0)" -gt 1048576' 2>/dev/null | grep -q .; then
-  bad "存在大于 1MB 的跟踪文件"
+BIG=$(git ls-files -z | xargs -0 -I{} sh -c '
+  f="{}"
+  sz=$(stat -f%z "$f" 2>/dev/null || stat -c%s "$f" 2>/dev/null || echo 0)
+  [ "$sz" -gt 1048576 ] && echo "$f"
+' 2>/dev/null)
+if [ -n "$BIG" ]; then
+  bad "存在大于 1MB 的跟踪文件："
+  echo "$BIG" | head -5 | sed 's/^/      /'
 else
   ok "无超大文件"
 fi
@@ -46,7 +52,7 @@ if [ -x ./.venv/bin/python ]; then
     bad "单元测试失败："; tail -6 /tmp/preflight-unit.log | sed 's/^/      /'
   fi
 else
-  note "跳过：未找到 .venv（先跑 ./install.sh）"
+  bad "未找到 .venv，单元测试没有执行（先跑 ./install.sh）"
 fi
 
 echo "[5/5] MCP 协议握手"
@@ -55,7 +61,7 @@ if [ -x ./.venv/bin/python ]; then
     ok "通过"; else bad "握手失败："; tail -4 /tmp/preflight-smoke.log | sed 's/^/      /'
   fi
 else
-  note "跳过：未找到 .venv"
+  bad "未找到 .venv，MCP 握手没有执行（先跑 ./install.sh）"
 fi
 
 echo

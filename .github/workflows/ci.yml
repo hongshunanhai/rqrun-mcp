@@ -26,12 +26,13 @@ jobs:
       - name: 静态检查（脚本 / Python / JSON / TOML / SVG）
         run: |
           bash -n install.sh
+          bash -n scripts/preflight.sh
           python - <<'PY'
           import ast, glob, json, pathlib, tomllib
           import xml.etree.ElementTree as ET
 
           for f in ("rq_mcp.py", "scripts/smoke_test.py", "scripts/unit_tests.py",
-                    "scripts/merge_codex_toml.py"):
+                    "scripts/merge_codex_toml.py", "scripts/append_dsh_patch.py"):
               ast.parse(pathlib.Path(f).read_text(encoding="utf-8"))
 
           # 防止一踩再踩：shell 里 $VAR 紧跟中文会被当成变量名的一部分（C locale 下直接报错）
@@ -146,6 +147,7 @@ jobs:
       - name: DSH 多 profile 时不得瞎写
         run: |
           export HOME="$(mktemp -d)"
+          unset DSH_PROFILE
           mkdir -p "$HOME/.dsh/profiles/alpha" "$HOME/.dsh/profiles/beta"
           touch "$HOME/.dsh/profiles/alpha/cordis.patch.yml" "$HOME/.dsh/profiles/beta/cordis.patch.yml"
 
@@ -161,3 +163,27 @@ jobs:
           test "$(grep -c 'mcp-rqrun' "$HOME/.dsh/profiles/beta/cordis.patch.yml")" = "1"
           test "$(grep -c 'mcp-rqrun' "$HOME/.dsh/profiles/alpha/cordis.patch.yml")" = "0"
           echo "DSH：多 profile 跳过、指定不存在跳过、指定正确只写一个"
+
+      - name: YAML 末尾无换行时不得粘行
+        run: |
+          export HOME="$(mktemp -d)"
+          unset DSH_PROFILE
+          mkdir -p "$HOME/.dsh/profiles/solo"
+          printf -- '- id: existing\n  config:\n    provider: deepseek-account' \
+            > "$HOME/.dsh/profiles/solo/cordis.patch.yml"
+
+          ./install.sh --no-login --client=dsh
+
+          python3 - <<'PY'
+          import os, re
+          p = f'{os.environ["HOME"]}/.dsh/profiles/solo/cordis.patch.yml'
+          text = open(p, encoding='utf-8').read()
+          assert text.endswith("\n"), "结果没有以换行结尾"
+          assert "-account- id:" not in text, "新条目和上一行粘在一起了"
+          assert text.count("- id: mcp-rqrun") == 1, "条目数量不对"
+          assert "- id: existing" in text, "原有条目丢失"
+          print("DSH：无换行 YAML 追加安全")
+          PY
+
+      - name: 发布自检脚本可运行
+        run: ./scripts/preflight.sh

@@ -230,26 +230,8 @@ if want dsh; then
     fi
   fi
   if [ -n "$DSH_PATCH" ]; then
-    if grep -q 'id: mcp-rqrun' "$DSH_PATCH" 2>/dev/null; then
-      ok "DeepSeek Harness：已配置过 mcp-rqrun"
-    else
-      cp "$DSH_PATCH" "$DSH_PATCH.bak"
-      cat >> "$DSH_PATCH" <<EOF
-- id: mcp-rqrun
-  name: '@deepseek-ai/dsh-mcp-client'
-  config:
-    serverName: rqrun
-    transport: stdio
-    command: "$VENV_PY"
-    args:
-      - "$PY_SCRIPT"
-    failOnStartupError: false
-    toolCallTimeoutMs: 600000
-EOF
-      ok "DeepSeek Harness：已写入 ${DSH_PATCH}（重启 DSH 后生效）"
-    fi
-  else
-    warn "DeepSeek Harness：未检测到 profile，可让 DSH 里的 agent 安装 dsh-bundle/"
+    "$VENV_PY" "$REPO_DIR/scripts/append_dsh_patch.py" "$DSH_PATCH" "$VENV_PY" "$PY_SCRIPT" \
+      && ok "DeepSeek Harness：已处理 ${DSH_PATCH}（重启 DSH 后生效）"
   fi
 fi
 

@@ -1042,6 +1042,18 @@ def _month_total_km(today, sid, rows, oldest, history_complete=False):
         return None, "暂不可用"
 
 
+def _incomplete_note(hit_cap, oldest, target_start) -> str:
+    """分页触顶且没能**严格**回溯到目标起始周时，提示数据不完整。
+
+    oldest == target_start 不算覆盖：那一天可能还有记录没翻到。
+    """
+    if not hit_cap:
+        return ""
+    if oldest is None or oldest >= target_start:
+        return f"※ 仅回溯到 {oldest}，更早的周未计入"
+    return ""
+
+
 def _chart_volume(weeks: int = 10, sport: str = "run") -> bytes:
     from PIL import Image, ImageDraw
     import io
@@ -1083,9 +1095,7 @@ def _chart_volume(weeks: int = 10, sport: str = "run") -> bytes:
         raise RQError("没有可用的训练记录")
 
     # 只有"被页数上限截断"才算数据不完整；读完了历史则前面的周是真的没跑
-    note = ""
-    if hit_cap and (oldest is None or oldest > target_start):
-        note = f"※ 仅回溯到 {oldest}，更早的周未计入"
+    note = _incomplete_note(hit_cap, oldest, target_start)
 
     series = _weekly_series(rows, weeks, today=today)
     bars = [{"label": f"{w['start'].month}/{w['start'].day}",
