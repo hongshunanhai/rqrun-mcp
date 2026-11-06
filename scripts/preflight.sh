@@ -67,7 +67,7 @@ fi
 echo
 if [ "$FAIL" -eq 0 ]; then
   echo "✅ 自检通过，可以 commit / push"
-  echo "   提醒：确认 README 里的 <你的GitHub用户名> 已换成真实地址"
+  echo "   提醒：确认 README 里的 hongshunanhai 已换成真实地址"
 else
   echo "❌ 有问题，先修再发"
 fi

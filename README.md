@@ -53,7 +53,7 @@ AI：（调用 get_period_stats）2026 年至今 471.3 km，83 次，平均配�
 ### 方式一：一键脚本（推荐）
 
 ```bash
-git clone https://github.com/<你的GitHub用户名>/rqrun-mcp.git
+git clone https://github.com/hongshunanhai/rqrun-mcp.git
 cd rqrun-mcp
 ./install.sh
 ```
