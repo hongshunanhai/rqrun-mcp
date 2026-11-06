@@ -7,6 +7,6 @@
 
 只有想把配置分发给别人时，才需要这个目录：
 
-1. 修改 `cordis.patch.yml` 里两处 `/绝对路径/rqrun-mcp/...`
+1. 修改 `cordis.patch.yml` 里三处 `/绝对路径/rqrun-mcp/...`（command、args、cwd）
 2. 让 DSH 安装这个目录，或用 `plugin_manager` 的 `install_bundle`
 3. 重启 DSH

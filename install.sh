@@ -50,7 +50,7 @@ printf "${N}"
 step "[1/4] 检查 Python"
 PY=""
 CAND=()
-# 优先 3.10–3.13（3.14 太新，部分二进制包还没有 wheel）
+# 优先 3.11–3.13（3.14 可用但生态较新，遇到编译问题换 3.12）
 for n in python3.13 python3.12 python3.11; do
   p="$(command -v "$n" 2>/dev/null || true)"
   [ -n "$p" ] && CAND+=("$p")
